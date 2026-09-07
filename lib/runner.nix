@@ -257,7 +257,9 @@ vmHostPackages.buildPackages.runCommandLocal "microvm-${microvmConfig.hypervisor
 
 
   ${lib.concatMapStrings ({ tag, socket, source, proto, ... }:
-      lib.optionalString (proto == "virtiofs") ''
+      # DAX shares on crosvm have no socket: they bypass virtiofsd and are
+      # served directly by crosvm's own built-in virtio-fs device.
+      lib.optionalString (proto == "virtiofs" && socket != null) ''
         mkdir -p $out/share/microvm/virtiofs/${tag}
         echo "${socket}" > $out/share/microvm/virtiofs/${tag}/socket
         echo "${source}" > $out/share/microvm/virtiofs/${tag}/source

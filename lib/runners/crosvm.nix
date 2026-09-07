@@ -108,10 +108,17 @@ in {
         ]
       ) volumes
       ++
-      builtins.concatMap ({ proto, tag, source, socket, readOnly, ... }: {
-        "virtiofs" = [
-          "--vhost-user" "type=fs,socket=${socket}"
-        ];
+      builtins.concatMap ({ proto, tag, source, socket, readOnly, dax, cache, posixAcl, ... }: {
+        "virtiofs" =
+          if dax
+          then
+            # crosvm has no DAX support over the external vhost-user
+            # frontend, so serve this share with its own built-in
+            # virtio-fs device instead of virtiofsd (see options.nix).
+            [ "--shared-dir" "${source}:${tag}:type=fs:dax=true:cache=${cache}:posix_acl=${lib.boolToString posixAcl}" ]
+          else [
+            "--vhost-user" "type=fs,socket=${socket}"
+          ];
         "9p" = if readOnly then
           throw "Readonly 9p share is not supported"
         else [
