@@ -43,7 +43,10 @@ sudo ip tuntap add $IFACE_NAME mode tap user $USER
 ```
 
 **Note:** add `multi_queue` to this command line if the VM is configured
-with more than one CPU core.
+with more than one CPU core. qemu spreads the interface's queues across
+vCPUs automatically whenever `microvm.vcpu > 1`. crosvm does the same,
+but only when `microvm.crosvm.tapMultiQueue = true` is also set - unlike
+qemu, it is opt-in there (see its option reference for why).
 
 When running MicroVMs through the `host` module, the tap network
 interfaces are created through a systemd service dependency.

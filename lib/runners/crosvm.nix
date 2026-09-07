@@ -10,11 +10,16 @@ let
   inherit (pkgs.stdenv.hostPlatform) system;
   inherit (microvmConfig)
     vcpu mem balloon initialBalloonMem hotplugMem hotpluggedMem user volumes shares
-    socket devices vsock graphics credentialFiles
+    socket devices vsock graphics credentialFiles hugepageMem
     kernel initrdPath storeDisk storeOnDisk;
-  inherit (microvmConfig.crosvm) pivotRoot extraArgs;
+  inherit (microvmConfig.crosvm) pivotRoot extraArgs hostCpuTopology;
 
   crosvmPkg = microvmConfig.crosvm.package;
+
+  # Opt-in only: attaching a persistent TAP with multiple queues from an
+  # unprivileged process requires CAP_NET_ADMIN on crosvm, unlike a single
+  # queue (see options.nix, microvm.crosvm.tapMultiQueue).
+  tapMultiQueue = vcpu > 1 && microvmConfig.crosvm.tapMultiQueue;
 
   # Avoid pulling ${kernel.dev} and its dependencies into resulting closure
   vmlinux = pkgs.runCommand "vmlinux" {} ''
@@ -34,6 +39,7 @@ let
   };
 
 in {
+  inherit tapMultiQueue;
 
   preStart = ''
     rm -f ${socket}
@@ -83,6 +89,14 @@ in {
         "-r" storeDisk
       ]
       ++
+      lib.optionals hugepageMem [
+        "--hugepages"
+      ]
+      ++
+      lib.optionals hostCpuTopology [
+        "--host-cpu-topology"
+      ]
+      ++
       lib.optionals graphics.enable [
         "--vhost-user" "gpu,socket=${graphics.socket}"
       ]
@@ -126,24 +140,28 @@ in {
         ];
       }.${proto}) shares
       ++
-      (builtins.concatMap ({ id, type, mac, ... }: [
+      (builtins.concatMap ({ id, type, mac, tap ? {}, ... }: [
         "--net"
-        (lib.concatStringsSep "," ([
-          ( if type == "tap"
-            then "tap-name=${id}"
-            else if type == "macvtap"
-            then "tap-fd=${toString macvtapFds.${id}}"
-            else throw "Unsupported interface type ${type} for crosvm"
-          )
-          "mac=${mac}"
-        # ] ++ lib.optionals (vcpu > 1) [
-        #   "vq-pairs=${toString vcpu}"
-        ]))
+        (lib.concatStringsSep "," (
+          [ ( if type == "tap"
+              then "tap-name=${id}"
+              else if type == "macvtap"
+              # crosvm's tap-fd mode takes a single, already-open fd and has
+              # no multi-queue support for it (unlike qemu), so only the
+              # first of the opened fds is ever used here.
+              then "tap-fd=${toString (builtins.head macvtapFds.${id})}"
+              else throw "Unsupported interface type ${type} for crosvm"
+            )
+            "mac=${mac}"
+          ]
+          ++ lib.optionals (type == "tap" && tapMultiQueue) [
+            "vq-pairs=${toString vcpu}"
+          ]
+          ++ lib.optionals (type == "tap" && (tap.vhost or false)) [
+            "vhost-net=true"
+          ]
+        ))
       ]) microvmConfig.interfaces)
-      # ++
-      # lib.optionals (vcpu > 1) [
-      #   "--net-vq-pairs" (toString vcpu)
-      # ]
       ++
       lib.optionals (vsock.cid != null) [
         "--vsock" (toString vsock.cid)

@@ -871,6 +871,37 @@ in
       description = "A Hypervisor's sandbox directory";
     };
 
+    crosvm.hostCpuTopology = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Mirror the host's CPU topology (and some CPU features) into the
+        guest, via crosvm's `--host-cpu-topology`. Can help the guest
+        scheduler make better placement decisions on hosts with hybrid
+        P/E-core or NUMA topologies.
+
+        ::: {.warning}
+        crosvm requires `microvm.vcpu` to exactly equal the number of
+        online CPUs on the host this MicroVM actually runs on.
+        :::
+      '';
+    };
+
+    crosvm.tapMultiQueue = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Request one virtio-net queue pair per vCPU (`microvm.vcpu > 1`)
+        for TAP interfaces, spreading packet processing across vCPUs.
+
+        ::: {.warning}
+        Opt-in because crosvm requires `CAP_NET_ADMIN` for queues beyond
+        the first (`SIOCSIFFLAGS` on each extra queue); without it, this
+        fails with `ioctl failed: Operation not permitted`.
+        :::
+      '';
+    };
+
     crosvm.package = mkOption {
       description = "The crosvm package to use.";
       type = types.package;
