@@ -257,11 +257,17 @@ in {
         ) volumes
       )
       ++
-      arg "--fs" (map ({ proto, socket, tag, ... }:
+      arg "--fs" (map ({ proto, socket, tag, dax, daxWindowSize, ... }:
         if proto == "virtiofs"
-        then opsMapped {
-          inherit tag socket;
-        }
+        then opsMapped (
+          { inherit tag socket; }
+          // lib.optionalAttrs dax (
+            { dax = "on"; }
+            // lib.optionalAttrs (daxWindowSize != null) {
+              cache_size = daxWindowSize;
+            }
+          )
+        )
         else throw "cloud-hypervisor supports only shares that are virtiofs"
       ) shares)
       ++
