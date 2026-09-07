@@ -73,6 +73,51 @@ microvm.shares = [ {
 `[HOST_UID, HOST_UID+COUNT)` on the host.
 
 
+## DAX
+
+DAX lets the guest map file contents directly from the host's page
+cache instead of copying them through the virtqueue on every access,
+which can noticeably improve performance for frequently accessed
+files. See the [virtio-fs design
+doc](https://virtio-fs.gitlab.io/design.html) for how the DAX window
+works, and the [kernel DAX
+docs](https://www.kernel.org/doc/html/latest/filesystems/dax.html)
+for what DAX means on the guest's side of the mount. It is opt-in per
+share:
+
+- **`dax`** (bool, default `false`): enable DAX for this `virtiofs`
+  share.
+- **`daxWindowSize`** (string, default `"8G"`): size of the DAX
+  shared-memory window, e.g. `"4G"`. Only used by cloud-hypervisor
+  (passed as `cache_size`); the default matches both
+  cloud-hypervisor's own built-in default and crosvm's hard-coded
+  window size. Set to `null` to omit it on cloud-hypervisor and fall
+  back to its own default instead.
+
+Support is hypervisor-specific:
+
+- **cloud-hypervisor** negotiates DAX with the externally spawned
+  virtiofsd, same as any other `virtiofs` share.
+- **crosvm** has no DAX support over the vhost-user frontend used for
+  ordinary virtiofs shares. A `dax = true` share is instead served by
+  crosvm's own built-in virtio-fs device, bypassing virtiofsd
+  entirely. Read-only DAX shares are not supported on crosvm, since
+  that built-in device has no read-only mode. The DAX window is a
+  fixed 8GiB, hard-coded in crosvm; `daxWindowSize` has no effect
+  here.
+- **qemu** does not support DAX: QEMU removed the `cache-size` device
+  property that used to expose a DAX window for `vhost-user-fs-pci`.
+
+```nix
+microvm.shares = [ {
+  proto = "virtiofs";
+  tag = "assets";
+  source = "/var/lib/microvms/example/assets";
+  mountPoint = "/assets";
+  dax = true;
+} ];
+```
+
 ## Sharing a host's `/nix/store`
 
 If a share with `source = "/nix/store"` is defined, size and build
