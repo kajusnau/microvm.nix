@@ -118,7 +118,10 @@ in
       default = false;
       description = ''
         Whether to use hugepages as memory backend.
-        (Currently only respected if using cloud-hypervisor)
+
+        ::: {.note}
+        Only respected with cloud-hypervisor and crosvm.
+        :::
       '';
     };
 
@@ -360,10 +363,14 @@ in
               Enable vhost-net for TAP interfaces.
 
               When enabled, packet processing is offloaded to the kernel's
-              vhost-net module instead of QEMU userspace, significantly
+              vhost-net module instead of userspace, significantly
               improving network throughput (~10 Gbps vs ~1.5 Gbps).
 
               Requires the vhost_net kernel module on the host.
+
+              ::: {.note}
+              Only supported with qemu and crosvm.
+              :::
             '';
           };
         };
