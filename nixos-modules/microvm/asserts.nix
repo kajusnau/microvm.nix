@@ -2,6 +2,15 @@
 let
   inherit (config.networking) hostName;
 
+  # virtiofs shares whose DAX device bypasses virtiofsd entirely (crosvm only)
+  daxBypassShares = builtins.filter ({ proto, dax, ... }:
+    proto == "virtiofs" && dax && config.microvm.hypervisor == "crosvm"
+  ) config.microvm.shares;
+
+  # whether any virtiofs share actually spawns virtiofsd
+  anyVirtiofsdShares = builtins.any ({ proto, dax, ... }:
+    proto == "virtiofs" && !(dax && config.microvm.hypervisor == "crosvm")
+  ) config.microvm.shares;
 in
 lib.mkIf config.microvm.guest.enable {
   assertions =
@@ -85,14 +94,44 @@ lib.mkIf config.microvm.guest.enable {
     )
     ++
     # check for virtiofs shares without socket
-    map ({ tag, socket, ... }: {
-      assertion = socket != null;
+    # (DAX shares on crosvm are served without virtiofsd/a socket, see options.nix)
+    map ({ tag, socket, dax, ... }: {
+      assertion = socket != null || (dax && config.microvm.hypervisor == "crosvm");
       message = ''
         MicroVM ${hostName}: virtiofs share with tag "${tag}" is missing a `socket` path.
       '';
     }) (
       builtins.filter ({ proto, ... }: proto == "virtiofs")
         config.microvm.shares
+    )
+    ++
+    # check for DAX shares on unsupported hypervisors
+    map ({ tag, ... }: {
+      assertion = builtins.elem config.microvm.hypervisor [ "cloud-hypervisor" "crosvm" ];
+      message = ''
+        MicroVM ${hostName}: virtiofs share "${tag}" has dax=true, but DAX is
+        only supported with the cloud-hypervisor and crosvm hypervisors
+        (currently: ${config.microvm.hypervisor}).
+      '';
+    }) (
+      builtins.filter ({ proto, dax, ... }: proto == "virtiofs" && dax)
+        config.microvm.shares
+    )
+    ++
+    # check for read-only DAX shares on crosvm, whose built-in virtio-fs
+    # device (used for DAX) has no read-only mode
+    map ({ tag, ... }: {
+      assertion = false;
+      message = ''
+        MicroVM ${hostName}: virtiofs share "${tag}" combines dax=true with
+        readOnly=true on crosvm, but crosvm's built-in DAX device does not
+        support read-only shares.
+      '';
+    }) (
+      builtins.filter ({ proto, dax, readOnly, ... }:
+        proto == "virtiofs" && dax && readOnly &&
+        config.microvm.hypervisor == "crosvm"
+      ) config.microvm.shares
     )
     ++
     # check for virtiofs shares where posixAcl conflicts with translate-uid/gid
@@ -142,5 +181,24 @@ lib.mkIf config.microvm.guest.enable {
     ''
     ++ lib.optional config.nix.optimise.automatic ''
       Optimising the nix store is not recommended as it either uses lots of file handles with virtiofsd or as it doesn't do what you expect with a block device.
-    '';
+    ''
+    ++ lib.optionals config.microvm.virtiofsd.warnOnIgnoredExtraArgs (
+      # per-share extraArgs ignored on DAX+crosvm shares, which don't run virtiofsd
+      map ({ tag, ... }: ''
+        MicroVM ${hostName}: virtiofs share "${tag}" has dax=true on crosvm, so its
+        `extraArgs` are ignored: crosvm's built-in DAX device does not run virtiofsd.
+        Set `microvm.virtiofsd.warnOnIgnoredExtraArgs = false` to silence this.
+      '') (builtins.filter ({ extraArgs, ... }: extraArgs != []) daxBypassShares)
+      ++
+      # global virtiofsd.extraArgs ignored because virtiofsd never runs at all
+      lib.optional (
+        config.microvm.virtiofsd.extraArgs != [] &&
+        daxBypassShares != [] &&
+        !anyVirtiofsdShares
+      ) ''
+        MicroVM ${hostName}: `microvm.virtiofsd.extraArgs` is set, but no share uses
+        virtiofsd (all virtiofs shares have dax=true on crosvm), so it has no effect.
+        Set `microvm.virtiofsd.warnOnIgnoredExtraArgs = false` to silence this.
+      ''
+    );
 }

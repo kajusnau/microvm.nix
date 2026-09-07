@@ -382,10 +382,16 @@ in
           socket = mkOption {
             type = nullOr str;
             default =
-              if config.proto == "virtiofs"
+              if config.proto == "virtiofs" && !(config.dax && cfg.hypervisor == "crosvm")
               then "${hostName}-virtiofs-${config.tag}.sock"
               else null;
-            description = "Socket for communication with virtiofs daemon";
+            description = ''
+              Socket for communication with virtiofs daemon.
+
+              Unused for a DAX share (`dax = true`) with the crosvm
+              hypervisor, which serves the share directly through its own
+              built-in virtio-fs device instead of spawning virtiofsd.
+            '';
           };
           source = mkOption {
             type = nonEmptyStr;
@@ -428,6 +434,47 @@ in
             type = listOf str;
             default = [];
             description = "Extra arguments passed to virtiofsd for this share.";
+          };
+          dax = mkOption {
+            type = bool;
+            default = false;
+            description = ''
+              Enable DAX for this virtiofs share, letting the guest map file
+              contents directly from the host's page cache instead of
+              copying them through the virtqueue. Ignored when `proto` is
+              not `"virtiofs"`.
+
+              Support is hypervisor-specific:
+
+              - `cloud-hypervisor`: negotiated with the externally spawned
+                virtiofsd via `--fs dax=on,cache_size=...`.
+              - `crosvm`: crosvm has no DAX support over the external
+                vhost-user frontend used for other virtiofs shares, so a
+                DAX share is instead served by crosvm's own built-in
+                virtio-fs device, bypassing virtiofsd entirely (see
+                `socket` above). Read-only DAX shares are not supported,
+                as crosvm's built-in device has no read-only mode.
+              - `qemu`: unsupported. QEMU removed the `cache-size` device
+                property that used to expose a DAX window for
+                `vhost-user-fs-pci`.
+            '';
+          };
+          daxWindowSize = mkOption {
+            type = nullOr str;
+            default = "8G";
+            example = "4G";
+            description = ''
+              Size of the DAX shared-memory window. Only used when
+              `dax = true`. Defaults to `"8G"`, matching both
+              cloud-hypervisor's own built-in default and crosvm's
+              hard-coded window size.
+
+              - `cloud-hypervisor`: passed as `cache_size`; set to `null`
+                to omit it and fall back to cloud-hypervisor's own default
+                (8GiB) instead.
+              - `crosvm`: unused. crosvm's DAX window is a fixed 8GiB,
+                hard-coded, regardless of this option.
+            '';
           };
         };
       }));
@@ -992,6 +1039,17 @@ in
       default = [];
       description = ''
         Extra command-line switch to pass to virtiofsd.
+      '';
+    };
+
+    virtiofsd.warnOnIgnoredExtraArgs = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Warn when `extraArgs` (per-share, or `microvm.virtiofsd.extraArgs`)
+        would have no effect because virtiofsd is bypassed for `dax = true`
+        shares on crosvm (see `microvm.shares.*.dax`). Set to `false` to
+        silence these warnings.
       '';
     };
 
