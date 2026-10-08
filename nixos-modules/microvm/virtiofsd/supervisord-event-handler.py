@@ -1,5 +1,7 @@
+import os
 import subprocess
 import sys
+import time
 
 
 def write_stdout(s):
@@ -16,6 +18,7 @@ def write_stderr(s):
 def main():
     count = 0
     expected_count = @virtiofsdCount@
+    sockets = sys.argv[1:]
 
     while True:
         write_stdout('READY\n')
@@ -35,6 +38,8 @@ def main():
             write_stderr("Process state stopping...\n")
 
         if count >= expected_count:
+            while not all(map(os.path.exists, sockets)):
+                time.sleep(0.01)
             subprocess.run(["systemd-notify", "--ready"])
 
         write_stdout('RESULT 2\nOK')

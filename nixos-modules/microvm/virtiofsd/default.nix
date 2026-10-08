@@ -25,13 +25,16 @@ in
           "eventlistener:notify" = {
             # Increase the event queue buffer size such that we don't drop RUNNING events while the event handler hasn't started up yet
             buffer_size = (1 + builtins.length virtiofsShares) * 16;
-            command = pkgs.writers.writePython3 "supervisord-event-handler" { } (
-              pkgs.replaceVars  ./supervisord-event-handler.py {
-                # 1 for the event handler process
-                virtiofsdCount = 1 + builtins.length virtiofsShares;
-              }
-            );
+            command = lib.escapeShellArgs ([
+              (pkgs.writers.writePython3 "supervisord-event-handler" { } (
+                pkgs.replaceVars  ./supervisord-event-handler.py {
+                  # 1 for the event handler process
+                  virtiofsdCount = 1 + builtins.length virtiofsShares;
+                }
+              ))
+            ] ++ map ({ socket, ... }: socket) virtiofsShares);
             events = "PROCESS_STATE";
+            startsecs = 0;
           };
         } // builtins.listToAttrs (
           map ({ tag, socket, source, readOnly, cache, posixAcl, extraArgs, ... }: {
@@ -39,6 +42,8 @@ in
             value = {
               stderr_syslog = true;
               stdout_syslog = true;
+              # Readiness is the socket appearing, checked by the event handler.
+              startsecs = 0;
               command = pkgs.writeShellScript "virtiofsd-${tag}" ''
                 if [ $(id -u) = 0 ]; then
                   OPT_RLIMIT="--rlimit-nofile 1048576"
